@@ -1,12 +1,46 @@
-name: Build App
-# on:
-#   push:
-#     branches:
-#       - '**'
-#   pull_request:
-#     branches: 
-#       - '**'
-
+name: Build Selected App
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'OpenBK7231N'
+        type: choice
+        options:
+          - OpenBK7231T
+          - OpenBK7231N
+          - OpenXR809
+          - OpenXR806
+          - OpenXR872
+          - OpenBL602
+          - OpenW800
+          - OpenW600
+          - OpenLN882H
+          - OpenTR6260
+          - OpenRTL8710A
+          - OpenRTL8710B
+          - OpenRTL87X0C
+          - OpenRTL8720D
+          - OpenECR6600
+          - OpenRDA5981
+          - OpenRTL8721DA
+          - OpenRTL8720E
+          - OpenLN8825
+          - OpenESP32C2
+          - OpenESP32C3
+          - OpenESP32C6
+          - OpenESP32S3
+          - OpenESP32S2
+          - OpenESP32C5
+          - OpenESP32C61
+          - OpenESP8266
+          - OpenESP32
+          - OpenTXW81X
+          - OpenBK7231U
+          - OpenBK7238
+          - OpenBK7252
+          - OpenBK7252N
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   APP_NAME: ${{ github.event.repository.name }}
@@ -54,102 +88,11 @@ jobs:
           echo "sha_short=SHA-$(git rev-parse --short=12 HEAD)" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
-  build2:
-    name: Build Simulator
-    needs: refs
-    runs-on: windows-2022
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Checkout berry submodule
-      run: |
-        git submodule update --init --recursive libraries/berry
-
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Checkout simulator repository
-      run: |
-        git clone https://github.com/openshwprojects/obkSimulator
-        mkdir -p ./libs_for_simulator
-        cp -r ./obkSimulator/simulator/libs_for_simulator/* ./libs_for_simulator
-
-    - name: Build project
-      run: msbuild openBeken_win32_mvsc2017.vcxproj /p:Configuration=Release /p:PlatformToolset=v143
-    - name: Flatten build assets
-      run: |
-        mkdir -p flat
-        cp ./Release/openBeken_win32.exe flat/
-        cp ./obkSimulator/simulator/*.dll flat/
-        cp ./run_*.bat flat/
-        mkdir -p flat/examples
-        cp -r ./obkSimulator/examples/* flat/examples/
-    - name: Run unit tests
-      run: |
-        ./flat/openBeken_win32.exe -runUnitTests 2
-    - name: Compress build assets
-      run: |
-        Compress-Archive -Path flat/* -DestinationPath obkSimulator_win32_${{ needs.refs.outputs.version }}.zip
-    - name: Copy build assets
-      run: |
-        mkdir -Force output/${{ needs.refs.outputs.version }}
-        cp obkSimulator_win32_${{ needs.refs.outputs.version }}.zip output/${{ needs.refs.outputs.version }}/obkSimulator_${{ needs.refs.outputs.version }}.zip
-    - name: Upload build assets
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.APP_NAME }}_${{ needs.refs.outputs.version }}_sim
-        path: output/${{ needs.refs.outputs.version }}/obkSimulator_${{ needs.refs.outputs.version }}.zip
-
-  build_asan:
-    name: Build Linux Simulator and Run Tests With Address Sanitizer
-    needs: refs
-    runs-on: ubuntu-22.04
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Checkout berry submodule
-      run: |
-        git submodule update --init --recursive libraries/berry
-        mkdir -p libraries/berry/generate
-        ./libraries/berry/tools/coc/coc -o libraries/berry/generate libraries/berry/src src/berry/modules -c include/berry_conf.h
-
-    - name: Build project
-      run: ASAN=1 make -f custom.mk
-    - name: Run unit tests
-      run: |
-        export LSAN_OPTIONS=suppressions=platforms/linux/asan.suppressions
-        ./build/win_main -runUnitTests 2
-
-  build_ubsan:
-    name: Build Linux Simulator and Run Tests With Undefined Behavior Sanitizer
-    needs: refs
-    runs-on: ubuntu-22.04
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Checkout berry submodule
-      run: |
-        git submodule update --init --recursive libraries/berry
-        mkdir -p libraries/berry/generate
-        ./libraries/berry/tools/coc/coc -o libraries/berry/generate libraries/berry/src src/berry/modules -c include/berry_conf.h
-
-    - name: Build project
-      run: UBSAN=1 make -f custom.mk
-    - name: Run unit tests
-      run: |
-        export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:suppressions=platforms/linux/ubsan.suppressions
-        ./build/win_main -runUnitTests 2
-
   build:
     name: Build
     needs: refs
     runs-on: ubuntu-22.04
+    if: ${{ matrix.platform == github.event.inputs.platform || matrix.platform == format('{0}_ALT', github.event.inputs.platform) }}
     strategy:
       fail-fast: false
       matrix:
@@ -327,6 +270,7 @@ jobs:
     name: Build IDF
     needs: refs
     runs-on: ubuntu-24.04
+    if: ${{ matrix.platform == github.event.inputs.platform }}
     strategy:
       fail-fast: false
       matrix:
@@ -443,6 +387,7 @@ jobs:
   build_txw81x:
     name: Build TXW81X
     needs: refs
+    if: ${{ github.event.inputs.platform == 'OpenTXW81X' }}
     runs-on: windows-latest
     defaults:
       run:
@@ -476,8 +421,8 @@ jobs:
   merge:
     name: Merge Artifacts
     runs-on: ubuntu-22.04
-    needs: [refs, build, build2, build_idf, build_txw81x]
-    #if: always() && needs.refs.outputs.new_release == 'true' && (github.ref == 'refs/heads/main' || github.ref_name == 'alpha')
+    needs: [refs, build, build_idf, build_txw81x]
+    if: ${{ !failure() && !cancelled() }}
     steps:
       - name: Merge Artifacts
         uses: actions/upload-artifact/merge@v4
