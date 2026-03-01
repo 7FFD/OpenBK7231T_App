@@ -54,6 +54,10 @@ jobs:
       short_ref: ${{ steps.refs.outputs.short_ref }}
       version: ${{ steps.refs.outputs.version }}
       new_release: ${{ steps.refs.outputs.new_release }}
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      build_idf_matrix: ${{ steps.matrix.outputs.build_idf_matrix }}
+      has_build: ${{ steps.matrix.outputs.has_build }}
+      has_build_idf: ${{ steps.matrix.outputs.has_build_idf }}
     steps:
       - name: Source checkout
         uses: actions/checkout@v4
@@ -87,126 +91,91 @@ jobs:
           echo "short_ref=${BRANCHTRANSLATED}" >> $GITHUB_OUTPUT
           echo "sha_short=SHA-$(git rev-parse --short=12 HEAD)" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+      - name: Generate platform matrix
+        id: matrix
+        run: |
+          PLATFORM="${{ github.event.inputs.platform }}"
+
+          BUILD_MATRIX='{"include":[
+            {"platform":"OpenBK7231T","variant":"default"},
+            {"platform":"OpenBK7231N","variant":"default"},
+            {"platform":"OpenXR809","variant":"default","gcc":"8-2019-q3"},
+            {"platform":"OpenXR806","variant":"default","gcc":"8-2019-q3"},
+            {"platform":"OpenXR872","variant":"default","gcc":"8-2019-q3"},
+            {"platform":"OpenBL602","variant":"default"},
+            {"platform":"OpenW800","variant":"default"},
+            {"platform":"OpenW600","variant":"default"},
+            {"platform":"OpenLN882H","variant":"default","gcc":"10.3-2021.10"},
+            {"platform":"OpenTR6260","variant":"default"},
+            {"platform":"OpenRTL8710A","variant":"default","gcc":"8-2019-q3"},
+            {"platform":"OpenRTL8710B","variant":"default","gcc":"8-2019-q3"},
+            {"platform":"OpenRTL87X0C","variant":"default","gcc":"apt"},
+            {"platform":"OpenRTL8720D","variant":"default","gcc":"10.3-2021.10"},
+            {"platform":"OpenECR6600","variant":"default"},
+            {"platform":"OpenRDA5981","variant":"default","gcc":"6-2017-q2"},
+            {"platform":"OpenRTL8721DA","variant":"default"},
+            {"platform":"OpenRTL8720E","variant":"default"},
+            {"platform":"OpenLN8825","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7231T","variant":"berry"},
+            {"platform":"OpenBK7231T","variant":"tuyaMCU"},
+            {"platform":"OpenBK7231T","variant":"powerMetering"},
+            {"platform":"OpenBK7231T","variant":"irRemoteESP"},
+            {"platform":"OpenBK7231T","variant":"sensors"},
+            {"platform":"OpenBK7231N","variant":"berry"},
+            {"platform":"OpenBK7231N","variant":"tuyaMCU"},
+            {"platform":"OpenBK7231N","variant":"powerMetering"},
+            {"platform":"OpenBK7231N","variant":"irRemoteESP"},
+            {"platform":"OpenBK7231N","variant":"sensors"},
+            {"platform":"OpenBK7231N","variant":"hlw8112"},
+            {"platform":"OpenBK7231N","variant":"battery"},
+            {"platform":"OpenBL602","variant":"berry"},
+            {"platform":"OpenBK7231N_ALT","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7231T_ALT","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7231U","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7238","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7252","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7252N","variant":"default","gcc":"apt"},
+            {"platform":"OpenBK7238","variant":"berry","gcc":"apt"},
+            {"platform":"OpenBK7238","variant":"irRemoteESP","gcc":"apt"},
+            {"platform":"OpenBK7238","variant":"battery","gcc":"apt"}
+          ]}'
+
+          IDF_MATRIX='{"include":[
+            {"platform":"OpenESP32C2","variant":"2M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C3","variant":"2M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C2","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C3","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C6","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32S3","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32S2","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C5","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP32C61","variant":"4M","version":"v5.5.2","sdk":"esp-idf"},
+            {"platform":"OpenESP8266","variant":"default","version":"v3.4","sdk":"OpenESP8266"}
+          ]}'
+
+          FILTERED_BUILD=$(echo "$BUILD_MATRIX" | jq -c --arg p "$PLATFORM" \
+            '{include: [.include[] | select(.platform == $p or .platform == ($p + "_ALT"))]}')
+          FILTERED_IDF=$(echo "$IDF_MATRIX" | jq -c --arg p "$PLATFORM" \
+            '{include: [.include[] | select(.platform == $p)]}')
+
+          BUILD_COUNT=$(echo "$FILTERED_BUILD" | jq '.include | length')
+          IDF_COUNT=$(echo "$FILTERED_IDF" | jq '.include | length')
+
+          echo "build_matrix=$FILTERED_BUILD" >> $GITHUB_OUTPUT
+          echo "build_idf_matrix=$FILTERED_IDF" >> $GITHUB_OUTPUT
+
+          [[ $BUILD_COUNT -gt 0 ]] && echo "has_build=true" >> $GITHUB_OUTPUT || echo "has_build=false" >> $GITHUB_OUTPUT
+          [[ $IDF_COUNT -gt 0 ]] && echo "has_build_idf=true" >> $GITHUB_OUTPUT || echo "has_build_idf=false" >> $GITHUB_OUTPUT
 
   build:
     name: Build
     needs: refs
     runs-on: ubuntu-22.04
-    if: ${{ matrix.platform == github.event.inputs.platform || matrix.platform == format('{0}_ALT', github.event.inputs.platform) }}
+    if: ${{ needs.refs.outputs.has_build == 'true' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # default for all platforms
-          - platform: OpenBK7231T
-            variant: default
-          - platform: OpenBK7231N
-            variant: default
-          - platform: OpenXR809
-            variant: default
-            gcc: 8-2019-q3
-          - platform: OpenXR806
-            variant: default
-            gcc: 8-2019-q3
-          - platform: OpenXR872
-            variant: default
-            gcc: 8-2019-q3
-          - platform: OpenBL602
-            variant: default
-          - platform: OpenW800
-            variant: default
-          - platform: OpenW600
-            variant: default
-          - platform: OpenLN882H
-            variant: default
-            gcc: 10.3-2021.10
-          - platform: OpenTR6260
-            variant: default
-          - platform: OpenRTL8710A
-            variant: default
-            gcc: 8-2019-q3
-          - platform: OpenRTL8710B
-            variant: default
-            gcc: 8-2019-q3
-          - platform: OpenRTL87X0C
-            variant: default
-            gcc: apt
-          - platform: OpenRTL8720D
-            variant: default
-            gcc: 10.3-2021.10
-          - platform: OpenECR6600
-            variant: default
-          - platform: OpenRDA5981
-            variant: default
-            gcc: 6-2017-q2
-          - platform: OpenRTL8721DA
-            variant: default
-          - platform: OpenRTL8720E
-            variant: default
-          - platform: OpenLN8825
-            variant: default
-            gcc: apt
-
-          # extras for BK7231T
-          - platform: OpenBK7231T
-            variant: berry
-          - platform: OpenBK7231T
-            variant: tuyaMCU
-          - platform: OpenBK7231T
-            variant: powerMetering
-          - platform: OpenBK7231T
-            variant: irRemoteESP
-          - platform: OpenBK7231T
-            variant: sensors
-
-          # extras for BK7231N
-          - platform: OpenBK7231N
-            variant: berry
-          - platform: OpenBK7231N
-            variant: tuyaMCU
-          - platform: OpenBK7231N
-            variant: powerMetering
-          - platform: OpenBK7231N
-            variant: irRemoteESP
-          - platform: OpenBK7231N
-            variant: sensors
-          - platform: OpenBK7231N
-            variant: hlw8112
-          - platform: OpenBK7231N
-            variant: battery
-            
-          - platform: OpenBL602
-            variant: berry
-
-          # ALT firmware
-          - platform: OpenBK7231N_ALT
-            variant: default
-            gcc: apt
-          - platform: OpenBK7231T_ALT
-            variant: default
-            gcc: apt
-          - platform: OpenBK7231U
-            variant: default
-            gcc: apt
-          - platform: OpenBK7238
-            variant: default
-            gcc: apt
-          - platform: OpenBK7252
-            variant: default
-            gcc: apt
-          - platform: OpenBK7252N
-            variant: default
-            gcc: apt
-          # extras for BK7238
-          - platform: OpenBK7238
-            variant: berry
-            gcc: apt
-          - platform: OpenBK7238
-            variant: irRemoteESP
-            gcc: apt
-          - platform: OpenBK7238
-            variant: battery
-            gcc: apt
+      matrix: ${{ fromJSON(needs.refs.outputs.build_matrix) }}
     steps:
       - name: Source checkout
         uses: actions/checkout@v4
@@ -270,57 +239,10 @@ jobs:
     name: Build IDF
     needs: refs
     runs-on: ubuntu-24.04
-    if: ${{ matrix.platform == github.event.inputs.platform }}
+    if: ${{ needs.refs.outputs.has_build_idf == 'true' }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: OpenESP32C2
-            variant: 2M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C3
-            variant: 2M
-            version: v5.5.2
-            sdk: esp-idf
-
-          - platform: OpenESP32
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C2
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C3
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C6
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32S3
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32S2
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C5
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-          - platform: OpenESP32C61
-            variant: 4M
-            version: v5.5.2
-            sdk: esp-idf
-
-          - platform: OpenESP8266
-            variant: default
-            version: v3.4
-            sdk: OpenESP8266
+      matrix: ${{ fromJSON(needs.refs.outputs.build_idf_matrix) }}
     steps:
       - name: Source checkout
         uses: actions/checkout@v4
